@@ -3,9 +3,9 @@ import Image from "next/image";
 import Link from "next/link";
 
 interface ProfilePageProps {
-  params: {
+  params: Promise<{
     riotId: string;
-  };
+  }>;
 }
 
 export default async function ProfilePage({ params }: ProfilePageProps) {
@@ -17,7 +17,8 @@ export default async function ProfilePage({ params }: ProfilePageProps) {
   // Ideally, using a route like /profile/[gameName]/[tagLine] would be cleaner,
   // but let's parse the current convention.
 
-  const decodedId = decodeURIComponent(params.riotId);
+  const resolvedParams = await params;
+  const decodedId = decodeURIComponent(resolvedParams.riotId);
   const lastHyphenIndex = decodedId.lastIndexOf("-");
 
   const gameName = decodedId.substring(0, lastHyphenIndex);
@@ -33,9 +34,11 @@ export default async function ProfilePage({ params }: ProfilePageProps) {
 
     console.log(`Fetching Account: ${gameName} #${tagLine}`);
     account = await getAccountByRiotId(gameName, tagLine);
+    console.log("Account Data:", JSON.stringify(account, null, 2));
 
     console.log(`Fetching Summoner by PUUID: ${account.puuid}`);
     summoner = await getSummonerByPuuid(account.puuid);
+    console.log("Summoner Data:", JSON.stringify(summoner, null, 2));
   } catch (err: any) {
     // eslint-disable-line @typescript-eslint/no-explicit-any
     console.error("Profile Load Error:", err);

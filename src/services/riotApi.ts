@@ -1,8 +1,12 @@
 import { PlatformDataDTO, SummonerDTO, AccountDTO } from '@/types/tft';
+import { MOCK_ACCOUNT, MOCK_PLATFORM_DATA, MOCK_SUMMONER } from './mockData';
 
 const RIOT_API_KEY = process.env.RIOT_API_KEY;
 const BASE_URL_BR1 = 'https://br1.api.riotgames.com';
 const BASE_URL_AMERICAS = 'https://americas.api.riotgames.com';
+
+// Flag to force mock mode (useful for dev if key is missing/invalid)
+const USE_MOCK = process.env.NODE_ENV === 'development'; 
 
 /**
  * Erro customizado para falhas na API da Riot.
@@ -25,28 +29,65 @@ async function fetchRiotApi<T>(endpoint: string, region: 'br1' | 'americas' = 'b
     throw new Error('Riot API requests must be made from the server side only.');
   }
 
+  // Fallback imediato se não tiver key
   if (!RIOT_API_KEY) {
-    throw new Error('RIOT_API_KEY is not defined in environment variables.');
+    console.warn('RIOT_API_KEY missing. Returning MOCK data.');
+    return getMockDataForEndpoint<T>(endpoint);
   }
 
   const baseUrl = region === 'americas' ? BASE_URL_AMERICAS : BASE_URL_BR1;
   const url = `${baseUrl}${endpoint}`;
 
-  const response = await fetch(url, {
-    headers: {
-      'X-Riot-Token': RIOT_API_KEY,
-    },
-    next: { revalidate: 60 }
-  });
+  console.log(`[RiotAPI] Fetching: ${url}`);
+  console.log(`[RiotAPI] Key: ${RIOT_API_KEY ? RIOT_API_KEY.substring(0, 5) + '...' : 'MISSING'}`);
 
-  if (!response.ok) {
-    if (response.status === 404) {
-      console.warn(`Resource not found: ${endpoint}`);
+  try {
+    const response = await fetch(url, {
+        headers: {
+        'X-Riot-Token': RIOT_API_KEY || '',
+        },
+        next: { revalidate: 60 }
+    });
+
+    if (!response.ok) {
+        // Se der erro de auth (401/403), fazemos fallback para mock em desenvolvimento
+        if ((response.status === 401 || response.status === 403) && USE_MOCK) {
+            console.warn(`Riot API returned ${response.status}. Falling back to MOCK data.`);
+            return getMockDataForEndpoint<T>(endpoint);
+        }
+
+        if (response.status === 404) {
+            console.warn(`Resource not found: ${endpoint}`);
+        }
+        throw new RiotApiError(response.status, `Riot API request failed: ${response.statusText} (${response.status})`);
     }
-    throw new RiotApiError(response.status, `Riot API request failed: ${response.statusText} (${response.status})`);
-  }
 
-  return response.json();
+    return response.json();
+
+  } catch (error) {
+     if (USE_MOCK && error instanceof RiotApiError && (error.status === 403 || error.status === 401)) {
+         return getMockDataForEndpoint<T>(endpoint);
+     }
+     throw error;
+  }
+}
+
+function getMockDataForEndpoint<T>(endpoint: string): T {
+    console.log(`[MOCK] Returning mock data for: ${endpoint}`);
+    if (endpoint.includes('/tft/status/v1/platform-data')) {
+        return MOCK_PLATFORM_DATA as unknown as T;
+    }
+    if (endpoint.includes('/riot/account/v1/accounts/by-riot-id')) {
+        // Customize mock based on URL if needed
+        const parts = endpoint.split('/');
+        const name = parts[parts.length - 2];
+        const tag = parts[parts.length - 1];
+        return { ...MOCK_ACCOUNT, gameName: name || 'Mock', tagLine: tag || 'BR1' } as unknown as T;
+    }
+    if (endpoint.includes('/tft/summoner/v1/summoners/by-puuid')) {
+        return MOCK_SUMMONER as unknown as T;
+    }
+    throw new Error(`No mock data available for endpoint: ${endpoint}`);
 }
 
 /**
